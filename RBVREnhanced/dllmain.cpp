@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <string>
 #include <filesystem>
+#include "Types.h"
 
 // namespace shortcuts
 namespace fs = std::filesystem;
@@ -135,6 +136,32 @@ void ScanSongs(fs::path directory) {
     }
 }
 
+
+// Your super gamegem hack gets demolished by a compiler :uncanny:
+Color newgemcolor;
+Color* colorptr;
+
+BOOL(*RBGemSmasherComUpdateColorsTrampoline)(RBGemSmasherCom* thiscom);
+BOOL RBGemSmasherComUpdateColorsHook(RBGemSmasherCom* thiscom) {
+    // back up the colour pointer to be used in the next hook to change the colour
+    colorptr = &(thiscom->mColor);
+    BOOL r = RBGemSmasherComUpdateColorsTrampoline(thiscom);
+    // after this has been called, update the colors afterwards to fix particle effects
+    (thiscom->mColor).r = newgemcolor.r;
+    (thiscom->mColor).g = newgemcolor.g;
+    (thiscom->mColor).b = newgemcolor.b;
+    (thiscom->mColor).a = newgemcolor.a;
+    return r;
+}
+
+BOOL(*DoSetColorTrampoline)(void* component, void* proppath, void* propinfo, Color* color, Color* toset, int param_6, bool param_7);
+BOOL DoSetColorHook(void* component, void* proppath, PropInfo* propinfo, Color* color, Color* toset, int param_6, bool param_7) {
+    // normally, gems have their colour variable set to null, so if it's not then its not a gem
+    // alternatively if the colour to set is the pointer we saved before, its the strikeline, so we update that too
+    if (color != NULL && toset != colorptr) return DoSetColorTrampoline(component, proppath, propinfo, color, toset, param_6, param_7);
+    return DoSetColorTrampoline(component, proppath, propinfo, color, &newgemcolor, param_6, param_7);
+}
+
 // initialisation function
 void InitMod() {
     // install game hooks
@@ -162,6 +189,15 @@ void InitMod() {
         FILE* fDummy;
         freopen_s(&fDummy, "CONOUT$", "w", stderr);
         freopen_s(&fDummy, "CONOUT$", "w", stdout);
+    }
+    // since the game gem hooks are really hacky, lock them behind a boolean option
+    if (reader.GetBoolean("Cosmetic", "EnableGemColours", false)) {
+        InstallHook((void*)0x14033b860, &RBGemSmasherComUpdateColorsHook, (void**)&RBGemSmasherComUpdateColorsTrampoline);
+        InstallHook((void*)0x14053c9a0, &DoSetColorHook, (void**)&DoSetColorTrampoline);
+        newgemcolor.a = 1;
+        newgemcolor.r = reader.GetReal("Cosmetic", "GemR", 1.0);
+        newgemcolor.g = reader.GetReal("Cosmetic", "GemG", 1.0);
+        newgemcolor.b = reader.GetReal("Cosmetic", "GemB", 1.0);
     }
     // scan for songs in the specified folder
     ScanSongs(SongsFolder);
