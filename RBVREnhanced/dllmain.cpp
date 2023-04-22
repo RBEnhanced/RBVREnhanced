@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <string>
 #include <filesystem>
+#include <MinHook.h>
 #include "Types.h"
 
 // namespace shortcuts
@@ -162,20 +163,56 @@ BOOL DoSetColorHook(void* component, void* proppath, PropInfo* propinfo, Color* 
     return DoSetColorTrampoline(component, proppath, propinfo, color, &newgemcolor, param_6, param_7);
 }
 
+// VRless stuff
+typedef struct _Vector3 {
+    float x;
+    float y;
+    float z;
+} Vector3;
+
+typedef struct _Matrix3 {
+    Vector3 x;
+    Vector3 y;
+    Vector3 z;
+} Matrix3;
+
+typedef struct _Transform {
+    Matrix3 m;
+    Vector3 v;
+} Transform;
+
+void (*MetaStateGotoTrampoline)(void* metastate, int layout);
+void MetaStateGoto(void* metastate, int layout) {
+    if (layout == 0) layout = 1;
+    MetaStateGotoTrampoline(metastate, layout);
+    return;
+}
+
+// TODO: How do i rotate head to hit quickplay lol
+Transform* (*GetEyeXfmImplTrampoline)(void* vrmgr, Transform* return_storage, int eye);
+Transform* GetEyeXfmImpl(void* vrmgr, Transform* return_storage, int eye) {
+    Transform* r = GetEyeXfmImplTrampoline(vrmgr, return_storage, 0);
+    // eye height is hardcoded to 1.8288 in StubVrMgr so use that
+    return_storage->v.z += 1.8288;
+    return return_storage;
+}
+
+void UpdateEyeTextureResolution(void* rbprofile) {
+    return;
+}
+
+bool IsHandConnected(void* vrmgr, int hand_type) {
+    return true;
+}
+
 // initialisation function
 void InitMod() {
+    MH_Initialize();
     // install game hooks
-    InstallHook((void*)0x1406fa9a0, &NewFileHook, (void**)&NewFileTrampoline);
-    InstallHook((void*)0x1406f9380, &FileExistsHook, (void**)&FileExistsTrampoline);
-    InstallHook((void*)0x1402e0560, &SkuToSongNameHook, (void**)&SkuToSongNameTrampoline);
-    InstallHook((void*)0x140bb98d0, &OculusControllerConnectedHook, (void**)&OculusControllerConnectedTrampoline);
-    // install oculus API hooks for song loading purposes
-    HMODULE OVRPlatform = GetModuleHandleA("LibOVRPlatform64_1.dll");
-    if (OVRPlatform != NULL) {
-        InstallHook((void*)GetProcAddress(OVRPlatform, "ovr_PurchaseArray_GetSize"), &PurchaseArrayGetSizeHook, (void**)&PurchaseArrayGetSizeTrampoline);
-        InstallHook((void*)GetProcAddress(OVRPlatform, "ovr_PurchaseArray_GetElement"), &PurchaseArrayGetElementHook, (void**)&PurchaseArrayGetElementTrampoline);
-        InstallHook((void*)GetProcAddress(OVRPlatform, "ovr_Purchase_GetSKU"), &PurchaseGetSKUHook, (void**)&PurchaseGetSKUTrampoline);
-    }
+    MH_CreateHook((void*)0x1406fa9a0, &NewFileHook, (void**)&NewFileTrampoline);
+    MH_CreateHook((void*)0x1406f9380, &FileExistsHook, (void**)&FileExistsTrampoline);
+    MH_CreateHook((void*)0x1402e0560, &SkuToSongNameHook, (void**)&SkuToSongNameTrampoline);
+    MH_CreateHook((void*)0x140bb98d0, &OculusControllerConnectedHook, (void**)&OculusControllerConnectedTrampoline);
     // load config
     INIReader reader("RBVREnhanced.ini");
     RawfilesFolder = reader.Get("Arkless", "RawfilesFolder", DEFAULT_RAWFILES_DIR);
@@ -190,19 +227,39 @@ void InitMod() {
         freopen_s(&fDummy, "CONOUT$", "w", stderr);
         freopen_s(&fDummy, "CONOUT$", "w", stdout);
     }
+    // patching the oculus API in memory is not that great, so gate it behind an on-by-default config option
+    if (reader.GetBoolean("Settings", "LoadCustomSongs", true)) {
+        // install oculus API hooks for song loading purposes
+        MH_CreateHookApi(L"LibOVRPlatform64_1.dll", "ovr_PurchaseArray_GetSize", &PurchaseArrayGetSizeHook, (void**)&PurchaseArrayGetSizeTrampoline);
+        MH_CreateHookApi(L"LibOVRPlatform64_1.dll", "ovr_PurchaseArray_GetElement", &PurchaseArrayGetElementHook, (void**)&PurchaseArrayGetElementTrampoline);
+        MH_CreateHookApi(L"LibOVRPlatform64_1.dll", "ovr_Purchase_GetSKU", &PurchaseGetSKUHook, (void**)&PurchaseGetSKUTrampoline);
+        // scan for songs in the specified folder
+        ScanSongs(SongsFolder);
+        loadedExtraSKUs = skuList.size();
+        RBVRE_MSG("Loaded %i songs!", loadedExtraSKUs);
+    }
+    // and, VRless, partial
+    if (reader.GetBoolean("Settings", "NonVRMode", false)) {
+        // replaces OculusVrMgr with StubVrMgr initialisation
+        // and fixes up some StubVrMgr functions to actually work and not crash
+        MH_CreateHook((void*)0x140bb0b90, (void*)0x140bc5c40, NULL);
+        MH_CreateHook((void*)0x1402afc20, &MetaStateGoto, (void**)&MetaStateGotoTrampoline);
+        MH_CreateHook((void*)0x140bc5d40, &GetEyeXfmImpl, (void**)&GetEyeXfmImplTrampoline);
+        MH_CreateHook((void*)0x1403119f0, &UpdateEyeTextureResolution, NULL);
+        MH_CreateHook((void*)0x140bb09e0, &IsHandConnected, NULL);
+    }
     // since the game gem hooks are really hacky, lock them behind a boolean option
     if (reader.GetBoolean("Cosmetic", "EnableGemColours", false)) {
-        InstallHook((void*)0x14033b860, &RBGemSmasherComUpdateColorsHook, (void**)&RBGemSmasherComUpdateColorsTrampoline);
-        InstallHook((void*)0x14053c9a0, &DoSetColorHook, (void**)&DoSetColorTrampoline);
+        MH_CreateHook((void*)0x14033b860, &RBGemSmasherComUpdateColorsHook, (void**)&RBGemSmasherComUpdateColorsTrampoline);
+        MH_CreateHook((void*)0x14053c9a0, &DoSetColorHook, (void**)&DoSetColorTrampoline);
         newgemcolor.a = 1;
         newgemcolor.r = reader.GetReal("Cosmetic", "GemR", 1.0);
         newgemcolor.g = reader.GetReal("Cosmetic", "GemG", 1.0);
         newgemcolor.b = reader.GetReal("Cosmetic", "GemB", 1.0);
     }
-    // scan for songs in the specified folder
-    ScanSongs(SongsFolder);
-    loadedExtraSKUs = skuList.size();
-    RBVRE_MSG("Loaded %i songs!", loadedExtraSKUs);
+
+    // apply the hooks
+    MH_EnableHook(MH_ALL_HOOKS);
     // ready!
     RBVRE_MSG("Ready!");
 }
