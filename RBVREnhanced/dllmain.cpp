@@ -205,6 +205,18 @@ bool IsHandConnected(void* vrmgr, int hand_type) {
     return true;
 }
 
+//Song Speed Hack
+void* (*SetSpeedTrampoline)(void* thisTime, float speed);
+void SetSpeedHook(void* thisTime, float speed)
+{
+    INIReader reader("RBVREnhanced.ini");
+    if (speed == 1.0)
+        speed = (reader.GetReal("Settings", "SongSpeedMultiplier", 1.0));
+    RBVRE_MSG("Music speed: %.2f", speed);
+    SetSpeedTrampoline(thisTime, speed);
+    return;
+}
+
 // initialisation function
 void InitMod() {
     MH_Initialize();
@@ -213,6 +225,7 @@ void InitMod() {
     MH_CreateHook((void*)0x1406f9380, &FileExistsHook, (void**)&FileExistsTrampoline);
     MH_CreateHook((void*)0x1402e0560, &SkuToSongNameHook, (void**)&SkuToSongNameTrampoline);
     MH_CreateHook((void*)0x140bb98d0, &OculusControllerConnectedHook, (void**)&OculusControllerConnectedTrampoline);
+    MH_CreateHook((void*)0x140603d60, &SetSpeedHook, (void**)&SetSpeedTrampoline);
     // load config
     INIReader reader("RBVREnhanced.ini");
     RawfilesFolder = reader.Get("Arkless", "RawfilesFolder", DEFAULT_RAWFILES_DIR);
