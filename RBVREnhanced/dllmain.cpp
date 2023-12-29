@@ -232,15 +232,28 @@ void SetVideoOffsetMsHook(void* thisSystemOptions, float offset, bool unk) {
 void (*SetAudioOffsetMsTrampoline)(void* thisSystemOptions, float offset, bool unk);
 void SetAudioOffsetMsHook(void* thisSystemOptions, float offset, bool unk) {
     INIReader reader("RBVREnhanced.ini");
-    float videoOffset = (reader.GetReal("Settings", "VideoOffset", 0.0)); // Load video offset number from RBVREnhanced.ini
+    float videoOffset = (reader.GetReal("Calibration", "VideoOffset", 0.0)); // Load video offset number from RBVREnhanced.ini
     SetVideoOffsetMsHook(thisSystemOptions, videoOffset, unk); // Force call the video offset from the audio offset to set it properly
-    if (offset > 299)
-        RBVRE_MSG("Audio calibration (%.0f) too high! (Max 299)", offset);
-    else if (offset < -299)
-        RBVRE_MSG("Audio calibration (%.0f) too low! (Min -299)", offset);
-    else
-        RBVRE_MSG("Set audio calibration : %.0f", offset);
-    return;
+    float audioOffset = (reader.GetReal("Calibration", "AudioOffset", 0.0)); // Load audio offset number from RBVREnhanced.ini
+    if (reader.HasValue("Calibration", "AudioOffset")) {
+        if (audioOffset > 299)
+            RBVRE_MSG("Audio calibration (%.0f) too high! (Max 299)", audioOffset);
+        else if (audioOffset < -299)
+            RBVRE_MSG("Audio calibration (%.0f) too low! (Min -299)", audioOffset);
+        else
+            RBVRE_MSG("Set audio calibration : %.0f", audioOffset);
+        return SetAudioOffsetMsTrampoline(thisSystemOptions, audioOffset, unk);
+    }
+    else {
+        RBVRE_MSG("Audio calibration doesn't exist in RBVREnhanced.ini, using existing calibration in config.json");
+        if (offset > 299)
+            RBVRE_MSG("Audio calibration (%.0f) too high! (Max 299)", offset);
+        else if (offset < -299)
+            RBVRE_MSG("Audio calibration (%.0f) too low! (Min -299)", offset);
+        else
+            RBVRE_MSG("Set audio calibration : %.0f", offset);
+        return SetAudioOffsetMsTrampoline(thisSystemOptions, offset, unk);
+    }
 }
 
 // initialisation function
