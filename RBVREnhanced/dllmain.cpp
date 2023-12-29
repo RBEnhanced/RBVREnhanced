@@ -207,13 +207,39 @@ bool IsHandConnected(void* vrmgr, int hand_type) {
 
 //Song Speed Hack
 void* (*SetSpeedTrampoline)(void* thisTime, float speed);
-void SetSpeedHook(void* thisTime, float speed)
-{
+void SetSpeedHook(void* thisTime, float speed) {
     INIReader reader("RBVREnhanced.ini");
     if (speed == 1.0)
         speed = (reader.GetReal("Settings", "SongSpeedMultiplier", 1.0));
     RBVRE_MSG("Music speed: %.2f", speed);
     SetSpeedTrampoline(thisTime, speed);
+    return;
+}
+
+//Calibration video offset fix
+void (*SetVideoOffsetMsTrampoline)(void* thisSystemOptions, float offset, bool unk);
+void SetVideoOffsetMsHook(void* thisSystemOptions, float offset, bool unk) {
+    if (offset > 299)
+        RBVRE_MSG("video calibration (%.0f) too high! (Max 299)", offset);
+    else if(offset < -299)
+        RBVRE_MSG("video calibration (%.0f) too low! (Min -299)", offset);
+    else
+        RBVRE_MSG("Set video calibration : %.0f", offset);
+    offset = offset * -1; // the offset needs to be inverted to have the correct effect
+    return SetVideoOffsetMsTrampoline(thisSystemOptions, offset, unk);
+}
+
+void (*SetAudioOffsetMsTrampoline)(void* thisSystemOptions, float offset, bool unk);
+void SetAudioOffsetMsHook(void* thisSystemOptions, float offset, bool unk) {
+    INIReader reader("RBVREnhanced.ini");
+    float videoOffset = (reader.GetReal("Settings", "VideoOffset", 0.0)); // Load video offset number from RBVREnhanced.ini
+    SetVideoOffsetMsHook(thisSystemOptions, videoOffset, unk); // Force call the video offset from the audio offset to set it properly
+    if (offset > 299)
+        RBVRE_MSG("Audio calibration (%.0f) too high! (Max 299)", offset);
+    else if (offset < -299)
+        RBVRE_MSG("Audio calibration (%.0f) too low! (Min -299)", offset);
+    else
+        RBVRE_MSG("Set audio calibration : %.0f", offset);
     return;
 }
 
@@ -226,6 +252,8 @@ void InitMod() {
     MH_CreateHook((void*)0x1402e0560, &SkuToSongNameHook, (void**)&SkuToSongNameTrampoline);
     MH_CreateHook((void*)0x140bb98d0, &OculusControllerConnectedHook, (void**)&OculusControllerConnectedTrampoline);
     MH_CreateHook((void*)0x140603d60, &SetSpeedHook, (void**)&SetSpeedTrampoline);
+    MH_CreateHook((void*)0x14072ef70, &SetVideoOffsetMsHook, (void**)&SetVideoOffsetMsTrampoline);
+    MH_CreateHook((void*)0x14072ee50, &SetAudioOffsetMsHook, (void**)&SetAudioOffsetMsTrampoline);
     // load config
     INIReader reader("RBVREnhanced.ini");
     RawfilesFolder = reader.Get("Arkless", "RawfilesFolder", DEFAULT_RAWFILES_DIR);
