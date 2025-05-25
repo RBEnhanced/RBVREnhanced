@@ -34,6 +34,7 @@ std::string RawfilesFolder(DEFAULT_RAWFILES_DIR);
 std::string SongsFolder(DEFAULT_SONGS_DIR);
 bool PrintRawfiles = false;
 bool PrintArkfiles = false;
+bool ingame = false;
 // global variables - song loading
 std::vector<std::string> skuList;
 int loadedExtraSKUs = 0;
@@ -50,6 +51,10 @@ typedef enum _FileMode {
 } FileMode;
 void *(*NewFileTrampoline)(const char* path, FileMode mode);
 void* NewFileHook(const char* path, FileMode mode) {
+    if (strcmp(path, "pc/venue/hub/hub.scene_pc") == 0)
+        ingame = false;
+    if (strcmp(path, "pc/venue/classic_track/vr_classic_track.entity_pc") == 0)
+        ingame = true;
     std::string rawpath(RawfilesFolder);
     if (rawpath.crbegin()[0] != '/') rawpath.append("/");
     rawpath.append(path);
@@ -193,7 +198,46 @@ Transform* (*GetEyeXfmImplTrampoline)(void* vrmgr, Transform* return_storage, in
 Transform* GetEyeXfmImpl(void* vrmgr, Transform* return_storage, int eye) {
     Transform* r = GetEyeXfmImplTrampoline(vrmgr, return_storage, 0);
     // eye height is hardcoded to 1.8288 in StubVrMgr so use that
+    //return_storage->v.z += 1.8288;
+    //return_storage->m.x.x = 0.866;
+    //return_storage->m.x.y = 0.500;
+    //return_storage->m.x.z = 0;
+    //return_storage->m.y.x = -0.473;
+    //return_storage->m.y.y = 0.819;
+    //return_storage->m.y.z = -0.326;
+    //return_storage->m.z.x = -0.163;
+    //return_storage->m.z.y = 0.282;
+    //return_storage->m.z.z = 0.946;
+    return return_storage;
+}
+
+Transform* (*GetCenterXfmTrampoline)(void* vrmgr, Transform* return_storage, bool eye);
+Transform* GetCenterXfm(void* vrmgr, Transform* return_storage, bool eye) {
+    Transform* r = GetCenterXfmTrampoline(vrmgr, return_storage, true);
+    // eye height is hardcoded to 1.8288 in StubVrMgr so use that
     return_storage->v.z += 1.8288;
+    if (ingame) {
+        return_storage->m.x.x = 1;
+        return_storage->m.x.y = 0;
+        return_storage->m.x.z = 0;
+        return_storage->m.y.x = 0;
+        return_storage->m.y.y = 1;
+        return_storage->m.y.z = 0;
+        return_storage->m.z.x = 0;
+        return_storage->m.z.y = 0;
+        return_storage->m.z.z = 1;
+    }
+    else {
+        return_storage->m.x.x = 0.819;
+        return_storage->m.x.y = 0.574;
+        return_storage->m.x.z = 0;
+        return_storage->m.y.x = -0.542;
+        return_storage->m.y.y = 0.775;
+        return_storage->m.y.z = -0.326;
+        return_storage->m.z.x = -0.187;
+        return_storage->m.z.y = 0.267;
+        return_storage->m.z.z = 0.946;
+    }
     return return_storage;
 }
 
@@ -299,6 +343,7 @@ void InitMod() {
         MH_CreateHook((void*)0x140bb0b90, (void*)0x140bc5c40, NULL);
         MH_CreateHook((void*)0x1402afc20, &MetaStateGoto, (void**)&MetaStateGotoTrampoline);
         MH_CreateHook((void*)0x140bc5d40, &GetEyeXfmImpl, (void**)&GetEyeXfmImplTrampoline);
+        MH_CreateHook((void*)0x140baeaa0, &GetCenterXfm, (void**)&GetCenterXfmTrampoline);
         MH_CreateHook((void*)0x1403119f0, &UpdateEyeTextureResolution, NULL);
         MH_CreateHook((void*)0x140bb09e0, &IsHandConnected, NULL);
     }
